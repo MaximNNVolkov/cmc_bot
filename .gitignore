@@ -2,9 +2,11 @@
 ### Example user template
 
 # IntelliJ project files
+venv
 .gitignore
 .idea
 .gigaide
 *.iml
 out
 gen
+.env
