@@ -17,6 +17,24 @@ router = Router()
 
 BRANCHES = ['8589', '8610', '8611', '8612', '8613', '8614', '8618', '6984', '9042']
 
+@router.message(Command("cancel"))
+@router.message(F.text.lower() == "отмена")
+async def cmd_cancel(message: types.Message, state: FSMContext):
+    try:
+        current_state = await state.get_state()
+        if current_state is None:
+            return
+
+        await state.clear()
+        await message.answer(
+            "❌ Действие отменено",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+        log.info(f"Пользователь {message.from_user.id} отменил действие")
+    except Exception as e:
+        log.error(f"Ошибка в cmd_cancel: {e}")
+        await notify_admin(f"Ошибка в cmd_cancel: {e}", message)
+
 @router.message(Command("sendresult"))
 async def cmd_sendresult(message: types.Message, state: FSMContext):
     try:
@@ -274,25 +292,6 @@ async def process_final_rejection(message: types.Message, state: FSMContext):
     except Exception as e:
         log.error(f"Ошибка в process_final_rejection: {e}")
         await notify_admin(f"Ошибка в process_final_rejection: {e}", message)
-
-
-@router.message(Command("cancel"))
-@router.message(F.text.lower() == "отмена")
-async def cmd_cancel(message: types.Message, state: FSMContext):
-    try:
-        current_state = await state.get_state()
-        if current_state is None:
-            return
-
-        await state.clear()
-        await message.answer(
-            "❌ Действие отменено",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-        log.info(f"Пользователь {message.from_user.id} отменил действие")
-    except Exception as e:
-        log.error(f"Ошибка в cmd_cancel: {e}")
-        await notify_admin(f"Ошибка в cmd_cancel: {e}", message)
 
 
 # Вспомогательные функции

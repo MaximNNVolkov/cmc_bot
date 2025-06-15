@@ -52,20 +52,3 @@ async def user_msg(message: types.Message, state: FSMContext):
     u = User(message.from_user)
     log.info('сообщение от пользователя' + u.info_user())
     await message.answer('user_msg')
-
-
-async def cmd_sendresult(message: types.Message, state: FSMContext):
-    u = User(message.from_user)
-    log.info('кнопка sendresult ' + u.info_user())
-
-    # Проверяем, отправлял ли пользователь отчет сегодня
-    if await check_daily_report_exists(u.id):
-        await message.answer("Вы уже отправили отчет сегодня!")
-        return
-
-    await state.set_state(StateUser.BRANCH)
-    await message.answer(
-        "Выберите ваше отделение:\n8589, 8610, 8611, 8612, 8613, 8614, 8618, 6984, 9042",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
-    await message.delete()

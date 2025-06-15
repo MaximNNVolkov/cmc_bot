@@ -27,6 +27,7 @@ async def main():
     await bot.set_my_commands([types.BotCommand(command="start", description="Перезапустить бота"),
                                types.BotCommand(command="help", description="Помощь"),
                                types.BotCommand(command="sendresult", description="Результаты"),
+                               types.BotCommand(command='cancel', description="Отмена"),
                                ])
     # Добавляем планировщик
     scheduler = AsyncIOScheduler()
