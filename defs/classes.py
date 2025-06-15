@@ -1,9 +1,4 @@
-from database import add_user, user_check, save_res, sales_check
-import configparser
-
-
-config = configparser.ConfigParser()
-config.read("config.ini")
+from database import add_user, user_check
 
 
 class User:
@@ -42,23 +37,3 @@ class User:
         return ''.join(['<a href="', self.url, '">', self.first_name, '</a>'])
 
 
-class UserSales:
-    """хранение атрибутов продаж"""
-
-    def __init__(self):
-        p = config.get('atrs', 'properties')
-        d = p.split(',')
-        self.my_d = {}
-        for i in d:
-            k, v = i.split(':')
-            self.my_d.update({k: v})
-
-    def save_result(self, u_id: int, res: dict):
-        r = {}
-        for k in self.my_d.keys():
-            r[k] = res[k]
-        if sales_check(u_id, res=r) == 'ok_sale':
-            save_res(u_id, res=r)
-            return True
-        else:
-            return False
