@@ -15,7 +15,7 @@ async def exit_admin(message: types.Message, state: FSMContext):
     log.info(u.info_user())
     log.info(f'Выход из режима Admin. Пользователь {u.info_user()}')
     await message.bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-    await state.reset_state()
+    await state.clear()
     await message.bot.send_message(chat_id=u.id,
                                    text=fmt.text(
                                        fmt.text(f'{u.get_url()}, Вы вышли из режима администратора.'),

@@ -4,9 +4,6 @@ import aiogram.utils.markdown as fmt
 from aiogram.fsm.context import FSMContext
 from defs.classes import User
 from fsm.admins import StateAdmin
-from comands.admins_commands.admins_commands import admin_commands
-from fsm.user_results import StateUser
-from database.defs_base import check_daily_report_exists
 
 
 log = log.get_logger(__name__)
@@ -42,8 +39,8 @@ async def admin_cmd(message: types.Message, state: FSMContext):
                                    text=fmt.text(
                                        fmt.text(f'Привет, {u.get_url()}!'),
                                        fmt.text('Вы вошли в режим администратора.'),
-                                       fmt.text(f'Доступны команды: {", ".join(admin_commands)}'),
-                                       fmt.text('Для выхода из режима администратора отправьте команду /exit_admin'),
+                                       fmt.text('Для выхода из режима администратора /exit\_admin'),
+                                       fmt.text('Для получения обновленного отчета /new\_report'),
                                        sep='\n')
                                    )
 
@@ -51,4 +48,4 @@ async def admin_cmd(message: types.Message, state: FSMContext):
 async def user_msg(message: types.Message, state: FSMContext):
     u = User(message.from_user)
     log.info('сообщение от пользователя' + u.info_user())
-    await message.answer('user_msg')
+    await message.answer(text=fmt.text('user\_msg'))
