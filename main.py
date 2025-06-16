@@ -31,8 +31,8 @@ async def main():
                                ])
     # Добавляем планировщик
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(send_reminders, 'cron', hour=17, minute=30, args=[bot])
-    scheduler.add_job(generate_daily_report, 'cron', hour=17, minute=50, args=[bot])
+    scheduler.add_job(send_reminders, 'cron', hour=16, minute=30, args=[bot])
+    scheduler.add_job(generate_daily_report, 'cron', hour=16, minute=50, args=[bot])
     scheduler.start()
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
