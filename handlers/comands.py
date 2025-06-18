@@ -1,6 +1,6 @@
 from aiogram import Router
-from aiogram.filters import Command, StateFilter
-from comands.comands import user_msg, cmd_help, cmd_start, admin_cmd#, cmd_sendresult
+from aiogram.filters import Command
+from comands.comands import user_msg, cmd_help, cmd_start, admin_cmd
 from handlers.user_results import cmd_cancel
 from filters.admins.is_admin import IsAdmin
 
