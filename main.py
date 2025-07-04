@@ -34,7 +34,7 @@ async def main():
     scheduler.add_job(send_reminders, 'cron', day_of_week = 'fri', hour=17, minute=30, args=[bot])
     scheduler.add_job(send_reminders, 'cron', day_of_week = 'mon-thu', hour=18, minute=30, args=[bot])
     scheduler.add_job(generate_daily_report, 'cron',day_of_week = 'mon-thu', hour=17, minute=50, args=[bot])
-    scheduler.add_job(generate_daily_report, 'cron',day_of_week = 'fri', hour=19, minute=50, args=[bot])
+    scheduler.add_job(generate_daily_report, 'cron',day_of_week = 'fri', hour=20, minute=50, args=[bot])
     scheduler.start()
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
