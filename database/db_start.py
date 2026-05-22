@@ -86,6 +86,16 @@ class DailyResults(DeclarativeBase):
     __table_args__ = (UniqueConstraint('user_id', 'date', name='_user_date_uc'),)
 
 
+class LeadRecord(DeclarativeBase):
+    __tablename__ = 'lead_records'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.user_id'))
+    date = Column(Date, default=datetime.now().date)
+    lead_index = Column(Integer)  # порядковый номер лида в день
+    lead_name = Column(String)   # Имя Отчество
+    channel = Column(String)     # ВСП / Премьер / Первый
+
+
 def db_conn():
     engine = create_engine(url_object)
     DeclarativeBase.metadata.create_all(engine)

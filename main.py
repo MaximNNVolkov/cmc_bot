@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.enums.parse_mode import ParseMode
 from aiogram.client.bot import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 
 from config_reader import config
 from handlers import comands, admin
@@ -21,14 +22,26 @@ logger = log.get_logger(__name__)
 async def main():
     logger.info('bot started')
     write_main_admin_db()
-    bot = Bot(token=Token, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
+    session = AiohttpSession(proxy='socks5://127.0.0.1:10808')
+    bot = Bot(token=Token, session=session, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_routers(admin.router, user_results.router, comands.router)
-    await bot.set_my_commands([types.BotCommand(command="start", description="Перезапустить бота"),
-                               types.BotCommand(command="help", description="Помощь"),
-                               types.BotCommand(command="sendresult", description="Результаты"),
-                               types.BotCommand(command='cancel', description="Отмена"),
-                               ])
+
+    # Устанавливаем команды отдельно с собственным таймаутом
+    try:
+        await asyncio.wait_for(
+            bot.set_my_commands([
+                types.BotCommand(command="start", description="Перезапустить бота"),
+                types.BotCommand(command="help", description="Помощь"),
+                types.BotCommand(command="sendresult", description="Результаты"),
+                types.BotCommand(command='cancel', description="Отмена"),
+            ]),
+            timeout=15
+        )
+        logger.info('commands set successfully')
+    except Exception as e:
+        logger.warning(f"set_my_commands failed: {e}")
+
     # Создаем планировщик с московским часовым поясом
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
     scheduler.add_job(send_reminders, 'cron', day_of_week = 'fri', hour=17, minute=30, args=[bot])
@@ -36,8 +49,16 @@ async def main():
     scheduler.add_job(generate_daily_report, 'cron',day_of_week = 'mon-thu', hour=17, minute=50, args=[bot])
     scheduler.add_job(generate_daily_report, 'cron',day_of_week = 'fri', hour=20, minute=50, args=[bot])
     scheduler.start()
-    await bot.delete_webhook(drop_pending_updates=True)
+
+    # Удаляем вебхук с таймаутом
+    try:
+        await asyncio.wait_for(bot.delete_webhook(drop_pending_updates=True), timeout=10)
+        logger.info('webhook deleted')
+    except Exception as e:
+        logger.warning(f"delete_webhook failed: {e}")
+
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    logger.info('polling started')
 
 
 if __name__ == "__main__":

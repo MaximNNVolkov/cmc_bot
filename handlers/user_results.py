@@ -1,12 +1,11 @@
 import logging
-import re
 from aiogram import Router, types, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 import aiogram.utils.markdown as fmt
 from fsm.user_results import StateUser
-from database.db_start import db_conn, UserInfo, DailyResults
+from database.db_start import db_conn, UserInfo, DailyResults, LeadRecord
 from datetime import datetime, date
 from config_reader import config
 import app_logger
@@ -16,6 +15,8 @@ log = app_logger.get_logger(__name__)
 router = Router()
 
 BRANCHES = ['8589', '8610', '8611', '8612', '8613', '8614', '8618', '6984', '9042']
+CHANNELS = ['ВСП', 'Премьер', 'Первый']
+
 
 @router.message(Command("cancel"))
 @router.message(F.text.lower() == "отмена")
@@ -24,7 +25,6 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
         current_state = await state.get_state()
         if current_state is None:
             return
-
         await state.clear()
         await message.answer(
             "❌ Действие отменено",
@@ -33,31 +33,26 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
         log.info(f"Пользователь {message.from_user.id} отменил действие")
     except Exception as e:
         log.error(f"Ошибка в cmd_cancel: {e}")
-        await notify_admin(f"Ошибка в cmd_cancel: {e}", message)
+
 
 @router.message(Command("sendresult"))
 async def cmd_sendresult(message: types.Message, state: FSMContext):
     try:
         user_id = message.from_user.id
 
-        # Проверяем существующий отчет
         if await check_daily_report_exists(user_id):
             await message.answer("📊 Вы уже отправили отчет сегодня!")
             return
 
-        # Проверяем существующие данные пользователя
         conn = db_conn()
         user_info = conn.query(UserInfo).filter(UserInfo.user_id == user_id).first()
 
         if user_info:
-            # Сохраняем данные в состояние
             await state.update_data(
                 branch=user_info.branch,
                 first_name=user_info.first_name,
                 last_name=user_info.last_name
             )
-
-            # Запрашиваем подтверждение личности
             await state.set_state(StateUser.USER_CONFIRMATION)
             await message.answer(
                 f"👤 Ваши сохраненные данные:\n"
@@ -67,16 +62,14 @@ async def cmd_sendresult(message: types.Message, state: FSMContext):
                 reply_markup=types.ReplyKeyboardRemove()
             )
         else:
-            # Новый пользователь - сразу запрашиваем ФИО
             await state.set_state(StateUser.USER_CONFIRMATION)
             await message.answer(
                 "👤 Введите ваше имя и фамилию (например: Иван Иванов):",
                 reply_markup=types.ReplyKeyboardRemove()
             )
-
     except Exception as e:
         log.error(f"Ошибка в cmd_sendresult: {e}")
-        await notify_admin(f"Ошибка в cmd_sendresult: {e}", message)
+
 
 @router.message(StateUser.USER_CONFIRMATION, F.text.lower() == "нет")
 async def process_user_decline(message: types.Message, state: FSMContext):
@@ -85,18 +78,19 @@ async def process_user_decline(message: types.Message, state: FSMContext):
         await message.answer("👤 Введите ваше имя и фамилию (например: Иван Иванов):")
     except Exception as e:
         log.error(f"Ошибка в process_user_decline: {e}")
-        await notify_admin(f"Ошибка в process_user_decline: {e}", message)
+
 
 @router.message(StateUser.USER_CONFIRMATION, F.text.lower() == "да")
 async def process_user_confirm(message: types.Message, state: FSMContext):
     try:
-        # Переходим к вводу первого показателя
-        await state.set_state(StateUser.LEGAL_EXAMINATION)
-        await message.answer("✅ Личность подтверждена!\n\n"
-                             "Введите количество Правовых экспертиз:")
+        await state.set_state(StateUser.LEADS_COUNT)
+        await message.answer(
+            "✅ Личность подтверждена!\n\n"
+            "Сколько вы сегодня передали ЛИДов по ЗП? (введите целое число):"
+        )
     except Exception as e:
         log.error(f"Ошибка в process_user_confirm: {e}")
-        await notify_admin(f"Ошибка в process_user_confirm: {e}", message)
+
 
 @router.message(StateUser.USER_CONFIRMATION)
 async def process_user_name(message: types.Message, state: FSMContext):
@@ -108,7 +102,6 @@ async def process_user_name(message: types.Message, state: FSMContext):
         first_name, last_name = message.text.split(maxsplit=1)
         await state.update_data(first_name=first_name, last_name=last_name)
 
-        # Создаем клавиатуру для выбора отделения
         builder = ReplyKeyboardBuilder()
         for branch in BRANCHES:
             builder.add(types.KeyboardButton(text=branch))
@@ -121,7 +114,7 @@ async def process_user_name(message: types.Message, state: FSMContext):
         )
     except Exception as e:
         log.error(f"Ошибка в process_user_name: {e}")
-        await notify_admin(f"Ошибка в process_user_name: {e}", message)
+
 
 @router.message(StateUser.BRANCH_SELECTION)
 async def process_branch(message: types.Message, state: FSMContext):
@@ -132,7 +125,6 @@ async def process_branch(message: types.Message, state: FSMContext):
 
         await state.update_data(branch=message.text)
 
-        # Сохраняем данные пользователя
         user_data = await state.get_data()
         conn = db_conn()
         user_info = UserInfo(
@@ -145,113 +137,131 @@ async def process_branch(message: types.Message, state: FSMContext):
         conn.merge(user_info)
         conn.commit()
 
-        await state.set_state(StateUser.LEGAL_EXAMINATION)
+        await state.set_state(StateUser.LEADS_COUNT)
         await message.answer(
             "✅ Данные сохранены!\n\n"
-            "Введите количество Правовых экспертиз:",
+            "Сколько вы сегодня передали ЛИДов по ЗП? (введите целое число):",
             reply_markup=types.ReplyKeyboardRemove()
         )
     except Exception as e:
         log.error(f"Ошибка в process_branch: {e}")
-        await notify_admin(f"Ошибка в process_branch: {e}", message)
 
-# Обработчики для каждого показателя
-@router.message(StateUser.LEGAL_EXAMINATION)
-async def process_legal_examination(message: types.Message, state: FSMContext):
+
+# ──────────────────────────────────────────────
+# Новая логика: сбор лидов
+# ──────────────────────────────────────────────
+
+@router.message(StateUser.LEADS_COUNT)
+async def process_leads_count(message: types.Message, state: FSMContext):
     try:
         if not message.text.isdigit() or int(message.text) < 0:
             await message.answer("❌ Пожалуйста, введите целое неотрицательное число:")
             return
 
-        await state.update_data(legal_examination=int(message.text))
-        await state.set_state(StateUser.SUBSCRIPTION)
-        await message.answer("Введите количество Подписок:")
-    except Exception as e:
-        log.error(f"Ошибка в process_legal_examination: {e}")
-        await notify_admin(f"Ошибка в process_legal_examination: {e}", message)
+        leads_count = int(message.text)
+        await state.update_data(leads_count=leads_count, leads=[])
 
-@router.message(StateUser.SUBSCRIPTION)
-async def process_subscription(message: types.Message, state: FSMContext):
-    try:
-        if not message.text.isdigit() or int(message.text) < 0:
-            await message.answer("❌ Пожалуйста, введите целое неотрицательное число:")
+        if leads_count == 0:
+            # Нет лидов — сразу на подтверждение
+            await show_confirmation(message, state)
             return
 
-        await state.update_data(subscription=int(message.text))
-        await state.set_state(StateUser.NON_MORTGAGE_SECONDARY)
-        await message.answer("Введите данные по Неипотеке-Вторичка:\nКоличество и сумму через пробел (например: 2 4500)")
+        # Начинаем цикл по лидам
+        await state.update_data(lead_index=0)
+        await state.set_state(StateUser.LEADS_LOOP_LEAD_NAME)
+        await message.answer(
+            f"📝 ЛИД №1 из {leads_count}\n\n"
+            "Укажите Имя и Отчество клиента (например: Иван Иванович):"
+        )
     except Exception as e:
-        log.error(f"Ошибка в process_subscription: {e}")
-        await notify_admin(f"Ошибка в process_subscription: {e}", message)
+        log.error(f"Ошибка в process_leads_count: {e}")
 
-@router.message(StateUser.NON_MORTGAGE_SECONDARY)
-async def process_non_mortgage_secondary(message: types.Message, state: FSMContext):
+
+@router.message(StateUser.LEADS_LOOP_LEAD_NAME)
+async def process_lead_name(message: types.Message, state: FSMContext):
     try:
-        parts = message.text.split()
-        if len(parts) != 2 or not parts[0].isdigit() or not is_float(parts[1]):
-            await message.answer("❌ Неверный формат. Введите количество и сумму через пробел (например: 2 4500):")
+        parts = message.text.strip().split()
+        if len(parts) < 2:
+            await message.answer("❌ Укажите Имя и Отчество через пробел (например: Иван Иванович):")
+            return
+        if len(parts) > 2:
+            await message.answer("❌ Указывать нужно без фамилии. Введите только Имя и Отчество (например: Иван Иванович):")
             return
 
-        await state.update_data(
-            non_mortgage_secondary_count=int(parts[0]),
-            non_mortgage_secondary_sum=float(parts[1])
-        )
-        await state.set_state(StateUser.NON_MORTGAGE_PRIMARY)
-        await message.answer("Введите данные по Неипотеке-Первичка:\nКоличество и сумму через пробел (например: 1 3000)")
-    except Exception as e:
-        log.error(f"Ошибка в process_non_mortgage_secondary: {e}")
-        await notify_admin(f"Ошибка в process_non_mortgage_secondary: {e}", message)
+        name = f"{parts[0]} {parts[1]}"
+        await state.update_data(current_lead_name=name)
+        await state.set_state(StateUser.LEADS_LOOP_LEAD_CHANNEL)
 
-@router.message(StateUser.NON_MORTGAGE_PRIMARY)
-async def process_non_mortgage_primary(message: types.Message, state: FSMContext):
+        # Клавиатура с каналами
+        builder = ReplyKeyboardBuilder()
+        for ch in CHANNELS:
+            builder.add(types.KeyboardButton(text=ch))
+        builder.adjust(2)
+
+        await message.answer(
+            "📡 Выберите канал:",
+            reply_markup=builder.as_markup(resize_keyboard=True)
+        )
+    except Exception as e:
+        log.error(f"Ошибка в process_lead_name: {e}")
+
+
+@router.message(StateUser.LEADS_LOOP_LEAD_CHANNEL)
+async def process_lead_channel(message: types.Message, state: FSMContext):
     try:
-        parts = message.text.split()
-        if len(parts) != 2 or not parts[0].isdigit() or not is_float(parts[1]):
-            await message.answer("❌ Неверный формат. Введите количество и сумму через пробел (например: 1 3000):")
+        if message.text not in CHANNELS:
+            await message.answer("❌ Пожалуйста, выберите канал из списка (ВСП / Премьер / Первый):")
             return
 
-        await state.update_data(
-            non_mortgage_primary_count=int(parts[0]),
-            non_mortgage_primary_sum=float(parts[1])
-        )
-        await state.set_state(StateUser.NON_MORTGAGE_COUNTRY)
-        await message.answer("Введите данные по Неипотеке-Загородка:\nКоличество и сумму через пробел (например: 0 0)")
+        channel = message.text
+        data = await state.get_data()
+        name = data.get('current_lead_name', '')
+
+        # Сохраняем лид
+        leads = data.get('leads', [])
+        leads.append({'name': name, 'channel': channel})
+        await state.update_data(leads=leads)
+
+        lead_index = data.get('lead_index', 0) + 1
+        leads_count = data.get('leads_count', 0)
+
+        if lead_index >= leads_count:
+            # Все лиды собраны
+            await show_confirmation(message, state)
+        else:
+            await state.update_data(lead_index=lead_index)
+            await state.set_state(StateUser.LEADS_LOOP_LEAD_NAME)
+            await message.answer(
+                f"📝 ЛИД №{lead_index + 1} из {leads_count}\n\n"
+                "Укажите Имя и Отчество клиента (например: Иван Иванович):",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
     except Exception as e:
-        log.error(f"Ошибка в process_non_mortgage_primary: {e}")
-        await notify_admin(f"Ошибка в process_non_mortgage_primary: {e}", message)
+        log.error(f"Ошибка в process_lead_channel: {e}")
 
-@router.message(StateUser.NON_MORTGAGE_COUNTRY)
-async def process_non_mortgage_country(message: types.Message, state: FSMContext):
-    try:
-        parts = message.text.split()
-        if len(parts) != 2 or not parts[0].isdigit() or not is_float(parts[1]):
-            await message.answer("❌ Неверный формат. Введите количество и сумму через пробел (например: 0 0):")
-            return
 
-        await state.update_data(
-            non_mortgage_country_count=int(parts[0]),
-            non_mortgage_country_sum=float(parts[1])
-        )
+async def show_confirmation(message: types.Message, state: FSMContext):
+    """Показывает подтверждение всех данных."""
+    data = await state.get_data()
+    leads = data.get('leads', [])
+    leads_count = data.get('leads_count', 0)
 
-        # Формируем сообщение для подтверждения
-        user_data = await state.get_data()
-        confirmation_text = (
-            "✅ Пожалуйста, проверьте введенные данные:\n\n"
-            f"ФИО: {user_data['first_name']} {user_data['last_name']}\n"
-            f"Отделение: {user_data['branch']}\n\n"
-            f"1. Правовая экспертиза: {user_data.get('legal_examination', 0)}\n"
-            f"2. Подписка: {user_data.get('subscription', 0)}\n"
-            f"3. Неипотека-Вторичка: {user_data.get('non_mortgage_secondary_count', 0)} / {user_data.get('non_mortgage_secondary_sum', 0)}\n"
-            f"4. Неипотека-Первичка: {user_data.get('non_mortgage_primary_count', 0)} / {user_data.get('non_mortgage_primary_sum', 0)}\n"
-            f"5. Неипотека-Загородка: {user_data.get('non_mortgage_country_count', 0)} / {user_data.get('non_mortgage_country_sum', 0)}\n\n"
-            "Все верно? (Да/Нет)"
-        )
+    text = (
+        "✅ Пожалуйста, проверьте введенные данные:\n\n"
+        f"ФИО: {data['first_name']} {data['last_name']}\n"
+        f"Отделение: {data['branch']}\n"
+        f"Передано лидов: {leads_count}\n\n"
+    )
 
-        await state.set_state(StateUser.CONFIRMATION)
-        await message.answer(confirmation_text)
-    except Exception as e:
-        log.error(f"Ошибка в process_non_mortgage_country: {e}")
-        await notify_admin(f"Ошибка в process_non_mortgage_country: {e}", message)
+    if leads:
+        for i, lead in enumerate(leads, 1):
+            text += f"{i}. {lead['name']} — {lead['channel']}\n"
+
+    text += "\nВсе верно? (Да/Нет)"
+
+    await state.set_state(StateUser.CONFIRMATION)
+    await message.answer(text, reply_markup=types.ReplyKeyboardRemove())
+
 
 @router.message(StateUser.CONFIRMATION, F.text.lower() == "да")
 async def process_final_confirmation(message: types.Message, state: FSMContext):
@@ -260,48 +270,56 @@ async def process_final_confirmation(message: types.Message, state: FSMContext):
         conn = db_conn()
         today = date.today()
 
-        # Сохраняем результаты
+        # Сохраняем лидов
+        leads = user_data.get('leads', [])
+        for i, lead in enumerate(leads):
+            lead_record = LeadRecord(
+                user_id=message.from_user.id,
+                date=today,
+                lead_index=i,
+                lead_name=lead['name'],
+                channel=lead['channel']
+            )
+            conn.add(lead_record)
+
+        # Сохраняем строку в daily_results (для совместимости с проверками отчёта)
         daily_result = DailyResults(
             user_id=message.from_user.id,
             date=today,
-            legal_examination=user_data.get('legal_examination', 0),
-            subscription=user_data.get('subscription', 0),
-            non_mortgage_secondary_count=user_data.get('non_mortgage_secondary_count', 0),
-            non_mortgage_secondary_sum=user_data.get('non_mortgage_secondary_sum', 0),
-            non_mortgage_primary_count=user_data.get('non_mortgage_primary_count', 0),
-            non_mortgage_primary_sum=user_data.get('non_mortgage_primary_sum', 0),
-            non_mortgage_country_count=user_data.get('non_mortgage_country_count', 0),
-            non_mortgage_country_sum=user_data.get('non_mortgage_country_sum', 0)
+            legal_examination=0,
+            subscription=0,
+            non_mortgage_secondary_count=0,
+            non_mortgage_secondary_sum=0,
+            non_mortgage_primary_count=0,
+            non_mortgage_primary_sum=0,
+            non_mortgage_country_count=0,
+            non_mortgage_country_sum=0
         )
-
         conn.add(daily_result)
         conn.commit()
 
-        await message.answer("📈 Ваши результаты успешно сохранены! Спасибо!")
+        await message.answer("📈 Ваши лиды успешно сохранены! Спасибо!")
         await state.clear()
     except Exception as e:
-        log.error(f"Ошибка при сохранении результатов: {e}")
-        await notify_admin(f"Ошибка при сохранении результатов: {e}", message)
+        log.error(f"Ошибка при сохранении: {e}")
         await message.answer("❌ Произошла ошибка при сохранении. Пожалуйста, попробуйте позже.")
+
 
 @router.message(StateUser.CONFIRMATION, F.text.lower() == "нет")
 async def process_final_rejection(message: types.Message, state: FSMContext):
     try:
-        await state.set_state(StateUser.LEGAL_EXAMINATION)
-        await message.answer("Начнем ввод показателей заново.\n\nВведите количество Правовых экспертиз:")
+        await state.set_state(StateUser.LEADS_COUNT)
+        await message.answer(
+            "Начнем ввод заново.\n\n"
+            "Сколько вы сегодня передали ЛИДов по ЗП? (введите целое число):"
+        )
     except Exception as e:
         log.error(f"Ошибка в process_final_rejection: {e}")
-        await notify_admin(f"Ошибка в process_final_rejection: {e}", message)
 
 
+# ──────────────────────────────────────────────
 # Вспомогательные функции
-def is_float(value):
-    try:
-        float(value)
-        return True
-    except ValueError:
-        return False
-
+# ──────────────────────────────────────────────
 
 async def check_daily_report_exists(user_id: int) -> bool:
     try:
@@ -314,13 +332,3 @@ async def check_daily_report_exists(user_id: int) -> bool:
     except Exception as e:
         log.error(f"Ошибка при проверке отчета: {e}")
         return False
-
-async def notify_admin(admin_message: str, message: types.Message = None, bot_main: Bot = None):
-    try:
-        admin_id = config.admin.get_secret_value()
-        bot = message.bot if message is not None else bot_main
-        await bot.send_message(chat_id=admin_id,
-                               text=fmt.text(fmt.text("⚠️ ОШИБКА В БОТЕ:"),
-        fmt.blockquote(admin_message),sep = '\n'))
-    except Exception as e:
-        log.error(f"Ошибка при отправке уведомления админу: {e}")
